@@ -7,16 +7,18 @@ import Perfil from './pages/Perfil'
 
 function App() {
   return (
-    <BrowserRouter>
-      <Routes>
-        <Route path="/login" element={<Login />} />
-        <Route path="/register" element={<Register />} />
-        <Route path="/contactos" element={<Contactos />} />
-        <Route path="/chat/:chatId" element={<Chat />} />
-        <Route path="/perfil" element={<Perfil />} />
-        <Route path="*" element={<Navigate to="/login" />} />
-      </Routes>
-    </BrowserRouter>
+    <div className="bg-white dark:bg-gray-900 text-black dark:text-white min-h-screen">
+      <BrowserRouter>
+        <Routes>
+          <Route path="/login" element={<Login />} />
+          <Route path="/register" element={<Register />} />
+          <Route path="/contactos" element={<Contactos />} />
+          <Route path="/chat/:chatId" element={<Chat />} />
+          <Route path="/perfil" element={<Perfil />} />
+          <Route path="*" element={<Navigate to="/login" />} />
+        </Routes>
+      </BrowserRouter>
+    </div>
   )
 }
 
