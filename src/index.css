@@ -23,3 +23,17 @@ html, body, #root {
 input {
   white-space: nowrap !important;
 }
+
+/* 🌙 Transición suave modo claro/oscuro */
+html {
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+body {
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+/* Para Tailwind dark mode */
+* {
+  transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease;
+}
