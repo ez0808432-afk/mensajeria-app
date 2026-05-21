@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { db } from '../firebase'
-import { collection, getDocs, query, where, addDoc, onSnapshot, updateDoc, deleteDoc, doc } from 'firebase/firestore'
+import { collection, getDocs, query, where, addDoc, onSnapshot, updateDoc, deleteDoc, doc, serverTimestamp } from 'firebase/firestore'
 
 /* ── helpers ──────────────────────────────────────────── */
 const AVATAR_COLORS = ['#0f766e','#2563eb','#7c3aed','#d97706','#e11d48','#0891b2','#059669','#ea580c']
@@ -67,14 +67,14 @@ export default function Contactos() {
     const updateOnline = async () => {
       const q    = query(collection(db, 'usuarios'), where('email', '==', user.email))
       const snap = await getDocs(q)
-      if (!snap.empty) await updateDoc(doc(db, 'usuarios', snap.docs[0].id), { online: true })
+      if (!snap.empty) await updateDoc(doc(db, 'usuarios', snap.docs[0].id), { online: true, lastSeen: null })
     }
     updateOnline()
 
     const handleOffline = async () => {
       const q    = query(collection(db, 'usuarios'), where('email', '==', user.email))
       const snap = await getDocs(q)
-      if (!snap.empty) await updateDoc(doc(db, 'usuarios', snap.docs[0].id), { online: false, lastSeen: new Date() })
+      if (!snap.empty) await updateDoc(doc(db, 'usuarios', snap.docs[0].id), { online: false, lastSeen: serverTimestamp() })
     }
 
     // Visibilidad / foco: marcar offline al ocultar o perder foco, y online al volver
