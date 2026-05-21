@@ -24,20 +24,12 @@ input {
   white-space: nowrap !important;
 }
 
-/* Forzar color legible en controles de formulario según tema */
-html:not(.dark) input,
-html:not(.dark) textarea,
-html:not(.dark) select,
-html:not(.dark) button {
-  color: #111827 !important; /* negro oscuro para modo claro */
+/* Forzar color legible por defecto en controles de formulario (modo claro) */
+input, textarea, select, button {
+  color: #111827 !important; /* negro oscuro por defecto */
 }
 
-html.dark input,
-html.dark textarea,
-html.dark select,
-html.dark button {
-  color: #e2e8f0 !important; /* color claro en modo oscuro */
-}
+/* Si quieres soportar modo oscuro, los componentes deben aplicar color claro explícitamente cuando corresponda. */
 
 /* 🌙 Transición suave modo claro/oscuro */
 html {
