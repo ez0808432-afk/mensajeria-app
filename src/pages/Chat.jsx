@@ -3,57 +3,46 @@ import { useNavigate, useParams, useLocation } from 'react-router-dom'
 import { db } from '../firebase'
 import {
   collection, addDoc, onSnapshot, orderBy, query,
-  serverTimestamp, updateDoc, deleteDoc, doc, where
+  serverTimestamp, updateDoc, deleteDoc, doc, getDocs, where
 } from 'firebase/firestore'
 import EmojiPicker from 'emoji-picker-react'
 
-/* ─── helpers ─────────────────────────────────────────── */
-function formatTime(ts) {
+/* ── helpers ─────────────────────────────────────────── */
+const initials = name =>
+  (name || '?').split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()
+
+const AVATAR_COLORS = [
+  '#0f766e','#2563eb','#7c3aed','#d97706',
+  '#e11d48','#0891b2','#059669','#ea580c'
+]
+const avatarColor = email =>
+  AVATAR_COLORS[[...(email||'a')].reduce((a,c)=>a+c.charCodeAt(0),0) % AVATAR_COLORS.length]
+
+const formatTime = ts => {
   if (!ts) return ''
   const d = ts.toDate ? ts.toDate() : new Date(ts)
   return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 }
 
-/* ─── THEME TOKENS  (cambia aquí para recolorear todo) ── */
-const THEME = {
-  light: {
-    bg:          'bg-slate-100',
-    sidebar:     'bg-white',
-    header:      'bg-teal-700',
-    headerText:  'text-white',
-    msgOut:      'bg-teal-600 text-white',
-    msgIn:       'bg-white text-gray-800',
-    input:       'bg-white',
-    inputBorder: 'border-slate-200',
-    send:        'bg-teal-600 hover:bg-teal-700 text-white',
-    timeOut:     'text-teal-100',
-    timeIn:      'text-gray-400',
-    empty:       'text-gray-400',
-    chatBg:      'bg-slate-100',
-  },
-  dark: {
-    bg:          'bg-[#111b21]',
-    sidebar:     'bg-[#1f2c34]',
-    header:      'bg-[#202c33]',
-    headerText:  'text-gray-100',
-    msgOut:      'bg-[#005c4b] text-gray-100',
-    msgIn:       'bg-[#1f2c34] text-gray-100',
-    input:       'bg-[#1f2c34]',
-    inputBorder: 'border-[#2a373f]',
-    send:        'bg-teal-600 hover:bg-teal-500 text-white',
-    timeOut:     'text-teal-200/70',
-    timeIn:      'text-gray-400',
-    empty:       'text-gray-500',
-    chatBg:      'bg-[#0b141a]',
-  }
+const formatLastSeen = ts => {
+  if (!ts) return ''
+  const d    = ts.toDate ? ts.toDate() : new Date(ts)
+  const diff = Math.floor((Date.now() - d) / 60000)
+  if (diff < 1)    return 'hace un momento'
+  if (diff < 60)   return `hace ${diff} min`
+  if (diff < 1440) return `hace ${Math.floor(diff / 60)}h`
+  return d.toLocaleDateString()
 }
 
+/* ═══════════════════════════════════════════════════════
+   COMPONENTE
+═══════════════════════════════════════════════════════ */
 export default function Chat() {
-  const navigate    = useNavigate()
-  const { chatId }  = useParams()
-  const location    = useLocation()
-  const contacto    = location.state?.contacto
-  const user        = JSON.parse(localStorage.getItem('usuario') || '{}')
+  const navigate   = useNavigate()
+  const { chatId } = useParams()
+  const location   = useLocation()
+  const contacto   = location.state?.contacto
+  const user       = JSON.parse(localStorage.getItem('usuario') || '{}')
 
   const [messages,     setMessages]     = useState([])
   const [input,        setInput]        = useState('')
@@ -61,31 +50,37 @@ export default function Chat() {
   const [showEmoji,    setShowEmoji]    = useState(false)
   const [menuMsg,      setMenuMsg]      = useState(null)
   const [reacting,     setReacting]     = useState(null)
+  const [recording,    setRecording]    = useState(false)
   const [dark,         setDark]         = useState(false)
+  const [showAttach,   setShowAttach]   = useState(false)  // menú adjuntar
+  const [showChatOpts, setShowChatOpts] = useState(false)  // menú ⋮
 
-  const bottomRef      = useRef(null)
-  const inputRef       = useRef(null)
-  const prevMsgCount   = useRef(0)
+  const bottomRef    = useRef(null)
+  const inputRef     = useRef(null)
+  const prevMsgCount = useRef(0)
+  const imgRef       = useRef(null)
+  const fileRef      = useRef(null)
 
-  const t = dark ? THEME.dark : THEME.light   // token shortcut
-
-  /* ── dark mode persistence ─────────────────────────── */
+  /* ── dark mode ─────────────────────────────────────── */
   useEffect(() => {
-    const saved = localStorage.getItem('theme')
-    const isDark = saved === 'dark'
-    setDark(isDark)
+    const saved = localStorage.getItem('theme') === 'dark'
+    setDark(saved)
+    document.documentElement.classList.toggle('dark', saved)
   }, [])
 
-  useEffect(() => {
-    localStorage.setItem('theme', dark ? 'dark' : 'light')
-  }, [dark])
+  const toggleDark = () => {
+    const next = !dark
+    setDark(next)
+    localStorage.setItem('theme', next ? 'dark' : 'light')
+    document.documentElement.classList.toggle('dark', next)
+  }
 
-  /* ── auth guard ─────────────────────────────────────── */
+  /* ── auth + info contacto ──────────────────────────── */
   useEffect(() => {
-    if (!user.email)  { navigate('/login');    return }
-    if (!chatId)      { navigate('/contactos'); return }
+    if (!user.email) { navigate('/login'); return }
+    if (!chatId)     { navigate('/contactos'); return }
     if (contacto?.contactoEmail) {
-      const q = query(collection(db, 'usuarios'), where('email', '==', contacto.contactoEmail))
+      const q    = query(collection(db,'usuarios'), where('email','==',contacto.contactoEmail))
       const unsub = onSnapshot(q, snap => {
         if (!snap.empty) setContactoInfo(snap.docs[0].data())
       })
@@ -93,10 +88,10 @@ export default function Chat() {
     }
   }, [chatId])
 
-  /* ── messages listener ──────────────────────────────── */
+  /* ── mensajes ──────────────────────────────────────── */
   useEffect(() => {
     if (!chatId) return
-    const q = query(collection(db, 'chats', chatId, 'mensajes'), orderBy('createdAt'))
+    const q    = query(collection(db,'chats',chatId,'mensajes'), orderBy('createdAt'))
     const unsub = onSnapshot(q, async snap => {
       const msgs = snap.docs.map(d => ({ id: d.id, ...d.data() }))
       setMessages(msgs)
@@ -104,18 +99,16 @@ export default function Chat() {
       if (msgs.length > prevMsgCount.current) {
         const ultimo = msgs[msgs.length - 1]
         if (ultimo?.email !== user.email && prevMsgCount.current > 0) {
-          const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2354/2354-preview.mp3')
-          audio.volume = 0.4
-          audio.play().catch(() => {})
+          new Audio('https://assets.mixkit.co/active_storage/sfx/2354/2354-preview.mp3')
+            .play().catch(() => {})
         }
         prevMsgCount.current = msgs.length
       }
 
       snap.docs.forEach(async d => {
         const data = d.data()
-        if (data.email !== user.email && !data.leido) {
-          await updateDoc(doc(db, 'chats', chatId, 'mensajes', d.id), { leido: true })
-        }
+        if (data.email !== user.email && !data.leido)
+          await updateDoc(doc(db,'chats',chatId,'mensajes',d.id), { leido: true })
       })
     })
     return () => unsub()
@@ -125,320 +118,523 @@ export default function Chat() {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
-  /* ── actions ────────────────────────────────────────── */
+  /* ── enviar texto ──────────────────────────────────── */
   const send = async () => {
     if (!input.trim()) return
     const text = input.trim()
     setInput('')
     setShowEmoji(false)
-    await addDoc(collection(db, 'chats', chatId, 'mensajes'), {
+    await addDoc(collection(db,'chats',chatId,'mensajes'), {
       text, user: user.name, email: user.email,
       createdAt: serverTimestamp(), leido: false, tipo: 'texto'
     })
   }
 
-  const handleKey = e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }
-
-  const onEmojiClick = emojiData => {
-    setInput(prev => prev + emojiData.emoji)
-    inputRef.current?.focus()
+  const handleKey = e => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() }
   }
 
-  const deleteMsg = async id => {
+  /* ── enviar imagen ─────────────────────────────────── */
+  const sendImage = async e => {
+    const file = e.target.files[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = async ev => {
+      await addDoc(collection(db,'chats',chatId,'mensajes'), {
+        text: ev.target.result, user: user.name, email: user.email,
+        createdAt: serverTimestamp(), leido: false, tipo: 'imagen', fileName: file.name
+      })
+    }
+    reader.readAsDataURL(file)
+    e.target.value = ''
+    setShowAttach(false)
+  }
+
+  /* ── enviar archivo ────────────────────────────────── */
+  const sendFile = async e => {
+    const file = e.target.files[0]
+    if (!file) return
+    await addDoc(collection(db,'chats',chatId,'mensajes'), {
+      text: file.name, user: user.name, email: user.email,
+      createdAt: serverTimestamp(), leido: false, tipo: 'archivo', fileName: file.name
+    })
+    e.target.value = ''
+    setShowAttach(false)
+  }
+
+  /* ── grabar audio ──────────────────────────────────── */
+  const toggleRecording = async () => {
+    if (!recording) {
+      try {
+        const stream   = await navigator.mediaDevices.getUserMedia({ audio: true })
+        const recorder = new MediaRecorder(stream)
+        const chunks   = []
+        recorder.ondataavailable = e => chunks.push(e.data)
+        recorder.onstop = async () => {
+          const blob   = new Blob(chunks, { type: 'audio/webm' })
+          const reader = new FileReader()
+          reader.onload = async ev => {
+            await addDoc(collection(db,'chats',chatId,'mensajes'), {
+              text: ev.target.result, user: user.name, email: user.email,
+              createdAt: serverTimestamp(), leido: false, tipo: 'audio'
+            })
+          }
+          reader.readAsDataURL(blob)
+          stream.getTracks().forEach(t => t.stop())
+        }
+        recorder.start()
+        setTimeout(() => recorder.stop(), 30000)
+        window._recorder = recorder
+        setRecording(true)
+      } catch { alert('No se pudo acceder al micrófono') }
+    } else {
+      window._recorder?.stop()
+      window._recorder = null
+      setRecording(false)
+    }
+  }
+
+  /* ── eliminar solo para mí ─────────────────────────── */
+  const deleteMsgMe = async id => {
+    await deleteDoc(doc(db,'chats',chatId,'mensajes',id))
     setMenuMsg(null)
-    await deleteDoc(doc(db, 'chats', chatId, 'mensajes', id))
   }
 
+  /* ── eliminar para todos ───────────────────────────── */
+  const deleteMsgAll = async id => {
+    await updateDoc(doc(db,'chats',chatId,'mensajes',id), {
+      tipo: 'deleted', text: '', leido: true
+    })
+    setMenuMsg(null)
+  }
+
+  /* ── reaccionar ────────────────────────────────────── */
   const reactMsg = async (id, emoji) => {
+    await updateDoc(doc(db,'chats',chatId,'mensajes',id), { reaccion: emoji })
     setReacting(null)
-    await updateDoc(doc(db, 'chats', chatId, 'mensajes', id), { reaccion: emoji })
   }
 
-  /* ── avatar initials ─────────────────────────────────── */
-  const initials = name => (name || '?').split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()
+  /* ── vaciar chat ───────────────────────────────────── */
+  const clearChat = async () => {
+    setShowChatOpts(false)
+    if (!window.confirm('¿Vaciar todo el chat? No se puede deshacer.')) return
+    const snap = await getDocs(collection(db,'chats',chatId,'mensajes'))
+    snap.forEach(d => deleteDoc(doc(db,'chats',chatId,'mensajes',d.id)))
+  }
 
-  /* ═══════════════════════════════════════════════════════
+  /* ── llamada / videollamada (placeholder) ──────────── */
+  const llamar = () => alert('📞 Función de llamada próximamente')
+  const videoLlamar = () => alert('📹 Función de videollamada próximamente')
+
+  /* ── datos contacto ────────────────────────────────── */
+  const contactoFoto   = contactoInfo?.foto   || contacto?.foto   || null
+  const contactoNombre = contactoInfo?.name   || contacto?.contactoNombre || 'Chat'
+  const contactoOnline = contactoInfo?.online || false
+  const contactoEmail  = contacto?.contactoEmail || ''
+
+  /* ── colores ───────────────────────────────────────── */
+  const C = {
+    appBg:      dark ? '#111b21' : '#e2e8f0',
+    panelBg:    dark ? '#111b21' : '#ffffff',
+    header:     dark ? '#1f2c34' : '#830000',
+    chatBg:     dark ? '#0b141a' : '#f0ede8',
+    msgOut:     dark ? '#005c4b' : '#830000',
+    msgOutTxt:  '#ffffff',
+    msgIn:      dark ? '#1f2c34' : '#ffffff',
+    msgInTxt:   dark ? '#f1f5f9' : '#1e293b',
+    deleted:    dark ? '#2a2a2a' : '#f3f4f6',
+    deletedTxt: dark ? '#6b7280' : '#9ca3af',
+    inputBar:   dark ? '#1f2c34' : '#f8fafc',
+    inputBdr:   dark ? 'rgba(255,255,255,0.06)' : '#e2e8f0',
+    inputBg:    dark ? '#2a3942' : '#ffffff',
+    inputFld:   dark ? '#e2e8f0' : '#111827',
+    menuBg:     dark ? '#233138' : '#ffffff',
+    menuBdr:    dark ? 'rgba(255,255,255,0.08)' : '#f1f5f9',
+    menuTxt:    dark ? '#f1f5f9' : '#374151',
+    subTxt:     dark ? '#64748b' : '#94a3b8',
+    timeOut:    'rgba(255,255,255,0.65)',
+    timeIn:     dark ? '#64748b' : '#9ca3af',
+    onlineClr:  dark ? '#34d399' : '#10b981',
+    divider:    dark ? 'rgba(255,255,255,0.05)' : '#f1f5f9',
+    attachBg:   dark ? '#1f2c34' : '#ffffff',
+    attachBdr:  dark ? 'rgba(255,255,255,0.08)' : '#e2e8f0',
+    iconClr:    dark ? '#94a3b8' : '#6b7280',
+    btnGhost:   'rgba(255,255,255,0.15)',
+  }
+
+  /* ════════════════════════════════════════════════════
      RENDER
-  ═══════════════════════════════════════════════════════ */
+  ════════════════════════════════════════════════════ */
   return (
     <div
-      className={`min-h-screen w-full ${t.bg} flex items-center justify-center transition-colors duration-300`}
-      onClick={() => { setMenuMsg(null); setReacting(null); setShowEmoji(false) }}
+      onClick={() => { setMenuMsg(null); setReacting(null); setShowEmoji(false); setShowAttach(false); setShowChatOpts(false) }}
+      style={{
+        width: '100%', height: '100vh', background: C.appBg,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        fontFamily: 'system-ui, sans-serif', transition: 'background 0.3s'
+      }}
     >
-      {/*
-        ┌──────────────────────────────────────────────────┐
-        │  CONTENEDOR PRINCIPAL                            │
-        │  móvil  → pantalla completa                      │
-        │  tablet → tarjeta centrada (max 520px)           │
-        │  laptop → layout de dos columnas (sidebar+chat)  │
-        └──────────────────────────────────────────────────┘
-      */}
-      <div className={`
-        w-full h-screen flex overflow-hidden
-        md:h-[90vh] md:max-w-[520px] md:rounded-2xl md:shadow-2xl md:border md:border-black/10
-        lg:max-w-[960px] lg:h-[90vh]
-        ${dark ? 'md:border-white/5' : ''}
-        transition-colors duration-300
-      `}>
+      {/* Contenedor adaptable:
+          móvil  → pantalla completa
+          tablet → tarjeta centrada 520px
+          laptop → tarjeta más ancha 900px con margen */}
+      <div style={{
+        width: '100%',
+        height: '100vh',
+        maxWidth: '520px',
+        display: 'flex',
+        flexDirection: 'column',
+        background: C.panelBg,
+        overflow: 'hidden',
+        transition: 'background 0.3s',
+        /* tablet+ */
+        ...(window.innerWidth >= 768 ? {
+          height: 'calc(100vh - 40px)',
+          borderRadius: '20px',
+          boxShadow: '0 8px 48px rgba(0,0,0,0.18)',
+          border: dark ? '1px solid rgba(255,255,255,0.05)' : '1px solid rgba(0,0,0,0.08)',
+        } : {}),
+        /* laptop — ancho mayor */
+        ...(window.innerWidth >= 1024 ? {
+          maxWidth: '900px',
+        } : {}),
+      }}>
 
-        {/* ── SIDEBAR (visible solo en laptop ≥1024px) ─── */}
-        <aside className={`
-          hidden lg:flex flex-col w-[360px] flex-shrink-0
-          ${t.sidebar} border-r ${dark ? 'border-white/5' : 'border-slate-200'}
-          transition-colors duration-300
-        `}>
-          {/* Header sidebar */}
-          <div className={`${t.header} px-4 py-3 flex items-center justify-between`}>
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-full bg-teal-400/30 flex items-center justify-center text-white font-bold text-sm">
-                {initials(user.name)}
+        {/* ── HEADER ─────────────────────────────────── */}
+        <div style={{
+          background: C.header,
+          padding: '12px 16px',
+          display: 'flex', alignItems: 'center', gap: '10px',
+          flexShrink: 0
+        }}>
+          {/* ← atrás */}
+          <button
+            onClick={() => navigate('/contactos')}
+            style={{ background: C.btnGhost, border: 'none', color: '#fff', borderRadius: '8px', padding: '6px 10px', fontSize: '16px', cursor: 'pointer', flexShrink: 0 }}
+          >←</button>
+
+          {/* Foto / avatar contacto */}
+          <div style={{ position: 'relative', flexShrink: 0 }}>
+            {contactoFoto ? (
+              <img
+                src={contactoFoto} alt={contactoNombre}
+                style={{ width: '40px', height: '40px', borderRadius: '50%', objectFit: 'cover', border: '2px solid rgba(255,255,255,0.25)' }}
+              />
+            ) : (
+              <div style={{
+                width: '40px', height: '40px', borderRadius: '50%',
+                background: avatarColor(contactoEmail),
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                color: '#fff', fontWeight: '700', fontSize: '14px'
+              }}>
+                {initials(contactoNombre)}
               </div>
-              <span className={`${t.headerText} font-semibold text-sm`}>{user.name}</span>
-            </div>
-            <button
-              onClick={e => { e.stopPropagation(); setDark(p => !p) }}
-              className="text-white/70 hover:text-white text-lg transition-colors"
-              title="Cambiar tema"
-            >
-              {dark ? '☀️' : '🌙'}
-            </button>
+            )}
+            {/* Punto online */}
+            <div style={{
+              position: 'absolute', bottom: '1px', right: '1px',
+              width: '11px', height: '11px', borderRadius: '50%',
+              background: contactoOnline ? '#10b981' : '#9ca3af',
+              border: `2px solid ${C.header}`
+            }} />
           </div>
 
-          {/* Contacto activo en sidebar */}
-          <div className={`flex-1 flex flex-col items-center justify-center gap-3 ${t.chatBg} transition-colors duration-300`}>
-            <div className="w-20 h-20 rounded-full bg-teal-500/20 flex items-center justify-center text-3xl font-bold text-teal-500">
-              {initials(contacto?.contactoNombre)}
-            </div>
-            <p className={`font-semibold text-lg ${dark ? 'text-gray-100' : 'text-gray-800'}`}>
-              {contacto?.contactoNombre || 'Contacto'}
+          {/* Nombre + estado */}
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <p style={{ color: '#fff', fontWeight: '600', fontSize: '14px', margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {contactoNombre}
             </p>
-            <p className="text-xs text-gray-400">{contacto?.contactoEmail || ''}</p>
-            {contactoInfo?.online && (
-              <span className="text-xs text-teal-400 flex items-center gap-1">
-                <span className="w-2 h-2 rounded-full bg-teal-400 inline-block" />
-                En línea
-              </span>
-            )}
-            <button
-              onClick={() => navigate('/contactos')}
-              className={`mt-4 px-4 py-1.5 rounded-lg text-sm ${dark ? 'bg-white/10 text-gray-300 hover:bg-white/20' : 'bg-slate-100 text-gray-600 hover:bg-slate-200'} transition-colors`}
-            >
-              ← Contactos
-            </button>
-          </div>
-        </aside>
-
-        {/* ── PANEL CHAT ──────────────────────────────────── */}
-        <div className={`flex-1 flex flex-col overflow-hidden ${dark ? 'bg-[#111b21]' : 'bg-white'} transition-colors duration-300`}>
-
-          {/* Header del chat */}
-          <div className={`${t.header} px-4 py-3 flex items-center gap-3 flex-shrink-0 transition-colors duration-300`}>
-
-            {/* Botón atrás (oculto en lg, visible en móvil/tablet) */}
-            <button
-              onClick={() => navigate('/contactos')}
-              className="lg:hidden text-white/80 hover:text-white text-xl leading-none"
-            >
-              ←
-            </button>
-
-            {/* Avatar del contacto */}
-            <div className="w-9 h-9 rounded-full bg-teal-400/25 flex items-center justify-center text-white font-bold text-sm flex-shrink-0">
-              {initials(contacto?.contactoNombre)}
-            </div>
-
-            <div className="flex-1 min-w-0">
-              <p className={`${t.headerText} font-semibold text-sm truncate`}>
-                {contacto?.contactoNombre || 'Chat'}
-              </p>
-              {contactoInfo?.online && (
-                <p className="text-teal-200 text-xs">En línea</p>
-              )}
-            </div>
-
-            {/* Dark toggle (móvil/tablet) */}
-            <button
-              onClick={e => { e.stopPropagation(); setDark(p => !p) }}
-              className="lg:hidden text-white/70 hover:text-white text-lg transition-colors"
-            >
-              {dark ? '☀️' : '🌙'}
-            </button>
+            <p style={{ color: 'rgba(255,255,255,0.75)', fontSize: '11px', margin: 0 }}>
+              {contactoOnline ? '● En línea' : `● Última vez ${formatLastSeen(contactoInfo?.lastSeen)}`}
+            </p>
           </div>
 
-          {/* ── Mensajes ──────────────────────────────────── */}
-          <div className={`flex-1 overflow-y-auto px-4 py-3 flex flex-col gap-1.5 ${t.chatBg} transition-colors duration-300`}>
-
-            {messages.length === 0 && (
-              <p className={`text-center ${t.empty} text-sm mt-8 select-none`}>
-                No hay mensajes aún. ¡Di hola! 👋
-              </p>
+          {/* Acciones header */}
+          {/* Llamada */}
+          <button onClick={llamar} title="Llamada de voz" style={{ background: C.btnGhost, border: 'none', color: '#fff', borderRadius: '8px', width: '34px', height: '34px', fontSize: '16px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>📞</button>
+          {/* Videollamada */}
+          <button onClick={videoLlamar} title="Videollamada" style={{ background: C.btnGhost, border: 'none', color: '#fff', borderRadius: '8px', width: '34px', height: '34px', fontSize: '16px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>📹</button>
+          {/* Dark toggle */}
+          <button onClick={e=>{e.stopPropagation();toggleDark()}} title="Tema" style={{ background: C.btnGhost, border: 'none', color: '#fff', borderRadius: '8px', width: '34px', height: '34px', fontSize: '15px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{dark?'☀️':'🌙'}</button>
+          {/* Menú ⋮ */}
+          <div style={{ position: 'relative' }}>
+            <button
+              onClick={e=>{e.stopPropagation();setShowChatOpts(p=>!p)}}
+              style={{ background: C.btnGhost, border: 'none', color: '#fff', borderRadius: '8px', width: '34px', height: '34px', fontSize: '20px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1 }}
+            >⋮</button>
+            {showChatOpts && (
+              <div onClick={e=>e.stopPropagation()} style={{ position: 'absolute', right: 0, top: '100%', marginTop: '6px', background: C.menuBg, border: `1px solid ${C.menuBdr}`, borderRadius: '12px', boxShadow: '0 4px 20px rgba(0,0,0,0.15)', zIndex: 200, minWidth: '180px', overflow: 'hidden' }}>
+                <button onClick={clearChat} style={{ width: '100%', padding: '11px 16px', border: 'none', background: 'none', textAlign: 'left', fontSize: '13px', cursor: 'pointer', color: '#f87171', display: 'flex', alignItems: 'center', gap: '8px' }}>🧹 Vaciar chat</button>
+                <button onClick={()=>{setShowChatOpts(false);navigate('/contactos')}} style={{ width: '100%', padding: '11px 16px', border: 'none', background: 'none', textAlign: 'left', fontSize: '13px', cursor: 'pointer', color: C.menuTxt, display: 'flex', alignItems: 'center', gap: '8px' }}>← Contactos</button>
+              </div>
             )}
+          </div>
+        </div>
 
-            {messages.map(m => {
-              const isMe = m.email === user.email
-              return (
-                <div
-                  key={m.id}
-                  className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} relative`}
-                >
+        {/* ── MENSAJES ───────────────────────────────── */}
+        <div style={{
+          flex: 1, overflowY: 'auto',
+          padding: '12px 14px',
+          display: 'flex', flexDirection: 'column', gap: '4px',
+          background: C.chatBg, minHeight: 0,
+          transition: 'background 0.3s'
+        }}>
+          {messages.length === 0 && (
+            <p style={{ textAlign: 'center', color: C.subTxt, fontSize: '13px', marginTop: '24px' }}>
+              No hay mensajes aún. ¡Di hola! 👋
+            </p>
+          )}
+
+          {messages.map(m => {
+            const isMe    = m.email === user.email
+            const deleted = m.tipo === 'deleted'
+
+            return (
+              <div key={m.id} style={{ display: 'flex', alignItems: 'flex-end', gap: '6px', flexDirection: isMe ? 'row-reverse' : 'row' }}>
+
+                {/* Mini avatar del contacto (mensajes recibidos) */}
+                {!isMe && (
+                  <div style={{ flexShrink: 0, marginBottom: '2px' }}>
+                    {contactoFoto ? (
+                      <img src={contactoFoto} alt="" style={{ width: '26px', height: '26px', borderRadius: '50%', objectFit: 'cover' }} />
+                    ) : (
+                      <div style={{ width: '26px', height: '26px', borderRadius: '50%', background: avatarColor(contactoEmail), display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontWeight: '700', fontSize: '10px' }}>
+                        {initials(contactoNombre)}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: isMe ? 'flex-end' : 'flex-start', maxWidth: '72%', position: 'relative' }}>
                   {/* Burbuja */}
                   <div
-                    onContextMenu={e => {
-                      e.preventDefault()
-                      setMenuMsg(m.id)
-                      setReacting(null)
+                    onContextMenu={e => { e.preventDefault(); if (!deleted) { setMenuMsg(m.id); setReacting(null) } }}
+                    style={{
+                      padding: deleted ? '8px 14px' : '8px 12px',
+                      borderRadius: isMe ? '14px 4px 14px 14px' : '4px 14px 14px 14px',
+                      background: deleted ? C.deleted : isMe ? C.msgOut : C.msgIn,
+                      color: deleted ? C.deletedTxt : isMe ? C.msgOutTxt : C.msgInTxt,
+                      fontSize: '14px', lineHeight: '1.45',
+                      boxShadow: '0 1px 2px rgba(0,0,0,0.1)',
+                      wordBreak: 'break-word', whiteSpace: 'pre-wrap',
+                      cursor: deleted ? 'default' : 'context-menu',
+                      fontStyle: deleted ? 'italic' : 'normal',
+                      transition: 'background 0.3s',
+                      minWidth: '80px',
                     }}
-                    className={`
-                      max-w-[75%] sm:max-w-[65%] px-3 py-2 text-sm shadow-sm
-                      break-words whitespace-pre-wrap cursor-default select-text
-                      transition-colors duration-300
-                      ${isMe
-                        ? `${t.msgOut} rounded-[16px_4px_16px_16px]`
-                        : `${t.msgIn} rounded-[4px_16px_16px_16px]`
-                      }
-                    `}
                   >
-                    {m.tipo === 'imagen' ? (
-                      <img src={m.text} alt="imagen" className="max-w-full rounded-lg" />
+                    {deleted ? (
+                      <span>🚫 Mensaje eliminado</span>
+                    ) : m.tipo === 'imagen' ? (
+                      <img src={m.text} alt="img" style={{ maxWidth: '100%', maxHeight: '260px', borderRadius: '8px', display: 'block', objectFit: 'contain' }} />
                     ) : m.tipo === 'audio' ? (
-                      <audio controls src={m.text} className="max-w-full" />
+                      <audio controls src={m.text} style={{ maxWidth: '220px', minWidth: '160px', display: 'block' }} />
+                    ) : m.tipo === 'archivo' ? (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span style={{ fontSize: '20px' }}>📄</span>
+                        <span style={{ fontSize: '13px', wordBreak: 'break-all' }}>{m.fileName || m.text}</span>
+                      </div>
                     ) : (
                       <span>{m.text}</span>
                     )}
 
-                    <div className={`flex justify-end items-center gap-1 mt-1 text-[10px] ${isMe ? t.timeOut : t.timeIn}`}>
-                      <span>{formatTime(m.createdAt)}</span>
-                      {isMe && (
-                        <span className={m.leido ? 'text-teal-300' : 'opacity-50'}>
-                          {m.leido ? '✓✓' : '✓'}
-                        </span>
-                      )}
-                    </div>
+                    {/* Hora + leído */}
+                    {!deleted && (
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '3px', marginTop: '4px' }}>
+                        <span style={{ fontSize: '10px', color: isMe ? C.timeOut : C.timeIn }}>{formatTime(m.createdAt)}</span>
+                        {isMe && <span style={{ fontSize: '10px', color: m.leido ? '#fbbf24' : 'rgba(255,255,255,0.4)' }}>{m.leido ? '✓✓' : '✓'}</span>}
+                      </div>
+                    )}
                   </div>
 
                   {/* Reacción */}
-                  {m.reaccion && (
-                    <span className="text-base mt-0.5 select-none">{m.reaccion}</span>
+                  {m.reaccion && !deleted && (
+                    <span style={{ fontSize: '16px', marginTop: '2px' }}>{m.reaccion}</span>
                   )}
 
                   {/* Menú contextual */}
                   {menuMsg === m.id && (
                     <div
                       onClick={e => e.stopPropagation()}
-                      className={`
-                        absolute top-full mt-1 rounded-xl shadow-xl z-50 min-w-[160px] overflow-hidden
-                        ${dark ? 'bg-[#233138] border border-white/5' : 'bg-white border border-slate-100'}
-                      `}
+                      style={{
+                        position: 'absolute', [isMe ? 'right' : 'left']: '0',
+                        top: '100%', marginTop: '4px',
+                        background: C.menuBg, border: `1px solid ${C.menuBdr}`,
+                        borderRadius: '12px', boxShadow: '0 4px 20px rgba(0,0,0,0.15)',
+                        zIndex: 100, minWidth: '190px', overflow: 'hidden'
+                      }}
                     >
-                      <button
-                        onClick={() => { setReacting(m.id); setMenuMsg(null) }}
-                        className={`w-full text-left px-4 py-2.5 text-sm ${dark ? 'hover:bg-white/5 text-gray-200' : 'hover:bg-slate-50 text-gray-700'}`}
-                      >
+                      <button onClick={() => { setReacting(m.id); setMenuMsg(null) }}
+                        style={{ width: '100%', padding: '10px 16px', border: 'none', background: 'none', textAlign: 'left', fontSize: '13px', cursor: 'pointer', color: C.menuTxt, display: 'flex', alignItems: 'center', gap: '8px' }}>
                         😊 Reaccionar
                       </button>
-                      {isMe && (
-                        <button
-                          onClick={() => deleteMsg(m.id)}
-                          className={`w-full text-left px-4 py-2.5 text-sm text-red-400 ${dark ? 'hover:bg-white/5' : 'hover:bg-slate-50'}`}
-                        >
-                          🗑️ Eliminar
+                      {isMe && <>
+                        <div style={{ height: '1px', background: C.divider }} />
+                        <button onClick={() => deleteMsgMe(m.id)}
+                          style={{ width: '100%', padding: '10px 16px', border: 'none', background: 'none', textAlign: 'left', fontSize: '13px', cursor: 'pointer', color: '#f87171', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          🗑️ Eliminar para mí
                         </button>
-                      )}
+                        <button onClick={() => deleteMsgAll(m.id)}
+                          style={{ width: '100%', padding: '10px 16px', border: 'none', background: 'none', textAlign: 'left', fontSize: '13px', cursor: 'pointer', color: '#f87171', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          🚫 Eliminar para todos
+                        </button>
+                      </>}
                     </div>
                   )}
 
-                  {/* Picker de reacciones */}
+                  {/* Picker reacciones */}
                   {reacting === m.id && (
                     <div
                       onClick={e => e.stopPropagation()}
-                      className={`
-                        absolute top-full mt-1 flex gap-2 px-3 py-1.5 rounded-full shadow-lg z-50
-                        ${dark ? 'bg-[#233138] border border-white/5' : 'bg-white border border-slate-100'}
-                      `}
+                      style={{
+                        position: 'absolute', [isMe ? 'right' : 'left']: '0',
+                        top: '100%', marginTop: '4px', zIndex: 100,
+                        display: 'flex', gap: '4px',
+                        background: C.menuBg, border: `1px solid ${C.menuBdr}`,
+                        borderRadius: '24px', padding: '6px 12px',
+                        boxShadow: '0 4px 16px rgba(0,0,0,0.15)'
+                      }}
                     >
-                      {['❤️','😂','👍','😮','😢','🔥'].map(e => (
-                        <span
-                          key={e}
-                          onClick={() => reactMsg(m.id, e)}
-                          className="cursor-pointer text-lg hover:scale-125 transition-transform"
-                        >
-                          {e}
-                        </span>
+                      {['❤️','😂','👍','😮','😢','🔥','👎','🎉'].map(e => (
+                        <span key={e} onClick={() => reactMsg(m.id, e)}
+                          style={{ fontSize: '20px', cursor: 'pointer', transition: 'transform 0.1s' }}
+                          onMouseEnter={ev => ev.target.style.transform = 'scale(1.3)'}
+                          onMouseLeave={ev => ev.target.style.transform = 'scale(1)'}
+                        >{e}</span>
                       ))}
                     </div>
                   )}
                 </div>
-              )
-            })}
+              </div>
+            )
+          })}
+          <div ref={bottomRef} />
+        </div>
 
-            <div ref={bottomRef} />
+        {/* ── EMOJI PICKER ───────────────────────────── */}
+        {showEmoji && (
+          <div onClick={e => e.stopPropagation()} style={{ position: 'absolute', bottom: '72px', left: '14px', zIndex: 300 }}>
+            <EmojiPicker
+              onEmojiClick={ed => { setInput(p => p + ed.emoji); inputRef.current?.focus() }}
+              theme={dark ? 'dark' : 'light'}
+              height={340} width={300}
+            />
           </div>
+        )}
 
-          {/* ── Input area ────────────────────────────────── */}
-          <div
-            className={`flex-shrink-0 px-3 py-2 flex items-end gap-2
-              ${dark ? 'bg-[#1f2c34] border-t border-white/5' : 'bg-slate-50 border-t border-slate-200'}
-              transition-colors duration-300
-            `}
-            onClick={e => e.stopPropagation()}
-          >
-            {/* Emoji toggle */}
+        {/* ── INPUT BAR ──────────────────────────────── */}
+        <div
+          onClick={e => e.stopPropagation()}
+          style={{
+            padding: '8px 12px',
+            borderTop: `1px solid ${C.inputBdr}`,
+            display: 'flex', gap: '6px', alignItems: 'center',
+            background: C.inputBar, flexShrink: 0,
+            transition: 'background 0.3s', position: 'relative'
+          }}
+        >
+          {/* Emoji */}
+          <button
+            onClick={() => { setShowEmoji(p => !p); setShowAttach(false) }}
+            style={{ background: 'none', border: 'none', fontSize: '22px', cursor: 'pointer', padding: '4px', flexShrink: 0, color: C.iconClr }}
+          >😊</button>
+
+          {/* Adjuntar — botón + menú */}
+          <div style={{ position: 'relative', flexShrink: 0 }}>
             <button
-              onClick={() => setShowEmoji(p => !p)}
-              className={`flex-shrink-0 w-9 h-9 flex items-center justify-center rounded-full text-xl
-                ${dark ? 'hover:bg-white/10 text-gray-400' : 'hover:bg-slate-200 text-gray-500'}
-                transition-colors`}
-            >
-              😊
-            </button>
+              onClick={e => { e.stopPropagation(); setShowAttach(p => !p); setShowEmoji(false) }}
+              style={{ background: 'none', border: 'none', fontSize: '22px', cursor: 'pointer', padding: '4px', color: C.iconClr }}
+            >📎</button>
 
-            {/* Picker */}
-            {showEmoji && (
-              <div className="absolute bottom-16 left-3 z-50">
-                <EmojiPicker
-                  onEmojiClick={onEmojiClick}
-                  theme={dark ? 'dark' : 'light'}
-                  height={360}
-                  width={300}
-                />
+            {showAttach && (
+              <div
+                onClick={e => e.stopPropagation()}
+                style={{
+                  position: 'absolute', bottom: '48px', left: 0,
+                  background: C.attachBg, border: `1px solid ${C.attachBdr}`,
+                  borderRadius: '14px', boxShadow: '0 4px 20px rgba(0,0,0,0.15)',
+                  zIndex: 200, overflow: 'hidden', minWidth: '170px'
+                }}
+              >
+                {/* Imagen */}
+                <label style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '11px 16px', cursor: 'pointer', color: C.menuTxt, fontSize: '13px', fontWeight: '500' }}
+                  onMouseEnter={e => e.currentTarget.style.background = dark?'rgba(255,255,255,0.05)':'#f8fafc'}
+                  onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                >
+                  <span style={{ fontSize: '20px' }}>🖼️</span> Imagen
+                  <input ref={imgRef} type="file" accept="image/*" onChange={sendImage} style={{ display: 'none' }} />
+                </label>
+                <div style={{ height: '1px', background: C.divider }} />
+                {/* Archivo */}
+                <label style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '11px 16px', cursor: 'pointer', color: C.menuTxt, fontSize: '13px', fontWeight: '500' }}
+                  onMouseEnter={e => e.currentTarget.style.background = dark?'rgba(255,255,255,0.05)':'#f8fafc'}
+                  onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                >
+                  <span style={{ fontSize: '20px' }}>📄</span> Documento
+                  <input ref={fileRef} type="file" onChange={sendFile} style={{ display: 'none' }} />
+                </label>
               </div>
             )}
-
-            {/* Textarea */}
-            <textarea
-              ref={inputRef}
-              rows={1}
-              value={input}
-              onChange={e => setInput(e.target.value)}
-              onKeyDown={handleKey}
-              placeholder="Escribe un mensaje..."
-              className={`
-                flex-1 resize-none rounded-2xl px-4 py-2.5 text-sm outline-none
-                max-h-32 overflow-y-auto leading-relaxed
-                ${dark
-                  ? 'bg-[#2a3942] text-gray-100 placeholder-gray-500'
-                  : 'bg-white text-gray-800 placeholder-gray-400 border border-slate-200'
-                }
-                transition-colors duration-300
-              `}
-            />
-
-            {/* Send */}
-            <button
-              onClick={send}
-              disabled={!input.trim()}
-              className={`
-                flex-shrink-0 w-9 h-9 flex items-center justify-center rounded-full text-base
-                ${t.send} disabled:opacity-40 disabled:cursor-not-allowed
-                transition-all duration-150 active:scale-95
-              `}
-            >
-              ➤
-            </button>
           </div>
 
-        </div>{/* fin panel chat */}
-      </div>{/* fin contenedor principal */}
+          {/* Input texto */}
+          <textarea
+            ref={inputRef}
+            rows={1}
+            value={input}
+            onChange={e => setInput(e.target.value)}
+            onKeyDown={handleKey}
+            placeholder="Escribe un mensaje..."
+            style={{
+              flex: 1, background: C.inputBg,
+              border: `1px solid ${C.inputBdr}`,
+              borderRadius: '22px', padding: '9px 16px',
+              fontSize: '14px', outline: 'none',
+              resize: 'none', maxHeight: '120px',
+              overflowY: 'auto', lineHeight: '1.4',
+              color: C.inputFld, transition: 'background 0.3s, border 0.3s'
+            }}
+          />
+
+          {/* Micrófono */}
+          <button
+            onClick={toggleRecording}
+            title={recording ? 'Detener grabación' : 'Grabar audio'}
+            style={{
+              background: recording ? '#ef4444' : 'none',
+              border: 'none', fontSize: '20px', cursor: 'pointer',
+              padding: '4px', borderRadius: '50%', flexShrink: 0,
+              color: recording ? '#fff' : C.iconClr,
+              width: '36px', height: '36px',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              animation: recording ? 'pulse 1s infinite' : 'none'
+            }}
+          >🎤</button>
+
+          {/* Enviar */}
+          <button
+            onClick={send}
+            disabled={!input.trim()}
+            style={{
+              background: input.trim() ? C.header : (dark ? '#2a3942' : '#e2e8f0'),
+              border: 'none', borderRadius: '50%',
+              width: '38px', height: '38px',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              cursor: input.trim() ? 'pointer' : 'default', flexShrink: 0,
+              transition: 'background 0.2s'
+            }}
+          >
+            <svg width="16" height="16" fill="none" stroke={input.trim() ? '#fff' : (dark?'#4b5563':'#9ca3af')} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
+              <line x1="22" y1="2" x2="11" y2="13"/>
+              <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+            </svg>
+          </button>
+        </div>
+
+      </div>
+
+      {/* Animación pulso para grabación */}
+      <style>{`@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.5} }`}</style>
     </div>
   )
 }
