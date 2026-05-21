@@ -67,7 +67,7 @@ export default function Contactos() {
     const updateOnline = async () => {
       const q    = query(collection(db, 'usuarios'), where('email', '==', user.email))
       const snap = await getDocs(q)
-      if (!snap.empty) await updateDoc(doc(db, 'usuarios', snap.docs[0].id), { online: true, lastSeen: new Date() })
+      if (!snap.empty) await updateDoc(doc(db, 'usuarios', snap.docs[0].id), { online: true })
     }
     updateOnline()
 
@@ -76,7 +76,20 @@ export default function Contactos() {
       const snap = await getDocs(q)
       if (!snap.empty) await updateDoc(doc(db, 'usuarios', snap.docs[0].id), { online: false, lastSeen: new Date() })
     }
+
+    // Visibilidad / foco: marcar offline al ocultar o perder foco, y online al volver
+    const handleVisibilityChange = () => {
+      if (document.hidden) handleOffline()
+      else updateOnline()
+    }
+
+    const handleWindowBlur = () => { handleOffline() }
+    const handleWindowFocus = () => { updateOnline() }
+
     window.addEventListener('beforeunload', handleOffline)
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    window.addEventListener('blur', handleWindowBlur)
+    window.addEventListener('focus', handleWindowFocus)
 
     const notificarMensaje = (chatId, emailContacto, nombreContacto) => {
       const mq = query(collection(db, 'chats', chatId, 'mensajes'), where('leido', '==', false), where('email', '==', emailContacto))
@@ -123,7 +136,13 @@ export default function Contactos() {
     const q2    = query(collection(db, 'contactos'), where('para', '==', user.email), where('estado', '==', 'pendiente'))
     const unsub2 = onSnapshot(q2, (snap) => setSolicitudes(snap.docs.map(d => ({ id: d.id, ...d.data() }))))
 
-    return () => { unsub1(); unsub2(); unsubUser(); window.removeEventListener('beforeunload', handleOffline) }
+    return () => {
+      unsub1(); unsub2(); unsubUser();
+      window.removeEventListener('beforeunload', handleOffline)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+      window.removeEventListener('blur', handleWindowBlur)
+      window.removeEventListener('focus', handleWindowFocus)
+    }
   }, [])
 
   // ── Acciones originales ──────────────────────────────────
