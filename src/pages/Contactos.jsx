@@ -198,7 +198,7 @@ export default function Contactos() {
   const logout = async () => {
     const q    = query(collection(db, 'usuarios'), where('email', '==', user.email))
     const snap = await getDocs(q)
-    if (!snap.empty) await updateDoc(doc(db, 'usuarios', snap.docs[0].id), { online: false, lastSeen: new Date() })
+    if (!snap.empty) await updateDoc(doc(db, 'usuarios', snap.docs[0].id), { online: false, lastSeen: serverTimestamp() })
     localStorage.removeItem('usuario')
     navigate('/login')
   }
