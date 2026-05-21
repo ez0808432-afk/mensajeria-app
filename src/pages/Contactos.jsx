@@ -11,6 +11,8 @@ const initials    = name  => (name||'?').split(' ').map(w=>w[0]).join('').slice(
 export default function Contactos() {
   const navigate = useNavigate()
 
+  const presenceUnsubs = useRef({})
+
   // ── Estado original ──────────────────────────────────────
   const [user,        setUser]        = useState(JSON.parse(localStorage.getItem('usuario') || '{}'))
   const [busqueda,    setBusqueda]    = useState('')
@@ -110,19 +112,25 @@ export default function Contactos() {
 
     const q1    = query(collection(db, 'contactos'), where('de', '==', user.email), where('estado', '==', 'aceptado'))
     const unsub1 = onSnapshot(q1, async (snap) => {
-      const lista         = snap.docs.map(d => ({ id: d.id, ...d.data() }))
-      const listaConEstado = await Promise.all(lista.map(async (c) => {
-        const uq    = query(collection(db, 'usuarios'), where('email', '==', c.contactoEmail))
-        const usnap = await getDocs(uq)
-        if (!usnap.empty) {
-          const udata = usnap.docs[0].data()
-          return { ...c, online: udata.online || false, lastSeen: udata.lastSeen, foto: udata.foto || null }
-        }
-        return { ...c, online: false }
-      }))
-      setContactos(listaConEstado)
+      const lista = snap.docs.map(d => ({ id: d.id, ...d.data() }))
 
-      listaConEstado.forEach(c => {
+      // limpiar listeners previos
+      Object.values(presenceUnsubs.current).forEach(u => u && u())
+      presenceUnsubs.current = {}
+
+      // inicializar contactos localmente sin estado de presencia (se actualizará por listeners)
+      setContactos(lista.map(c => ({ ...c, online: false, lastSeen: null, foto: null })))
+
+      // suscribirse a presencia de cada contacto
+      lista.forEach(c => {
+        const uq = query(collection(db, 'usuarios'), where('email', '==', c.contactoEmail))
+        presenceUnsubs.current[c.contactoEmail] = onSnapshot(uq, (usnap) => {
+          if (!usnap.empty) {
+            const udata = usnap.docs[0].data()
+            setContactos(prev => prev.map(p => p.id === c.id ? { ...p, online: udata.online || false, lastSeen: udata.lastSeen, foto: udata.foto || null } : p))
+          }
+        })
+
         const chatId = [user.email, c.contactoEmail].sort().join('_')
         notificarMensaje(chatId, c.contactoEmail, c.contactoNombre)
         const mq = query(collection(db, 'chats', chatId, 'mensajes'), where('leido', '==', false))
