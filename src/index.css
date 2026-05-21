@@ -24,6 +24,21 @@ input {
   white-space: nowrap !important;
 }
 
+/* Forzar color legible en controles de formulario según tema */
+html:not(.dark) input,
+html:not(.dark) textarea,
+html:not(.dark) select,
+html:not(.dark) button {
+  color: #111827 !important; /* negro oscuro para modo claro */
+}
+
+html.dark input,
+html.dark textarea,
+html.dark select,
+html.dark button {
+  color: #e2e8f0 !important; /* color claro en modo oscuro */
+}
+
 /* 🌙 Transición suave modo claro/oscuro */
 html {
   transition: background-color 0.3s ease, color 0.3s ease;

@@ -87,7 +87,7 @@ export default function Perfil() {
           <div style={{ marginBottom: '16px' }}>
             <label style={{ display: 'block', fontSize: '12px', color: '#6b7280', marginBottom: '4px' }}>Nombre</label>
             <input value={name} onChange={e => setName(e.target.value)}
-              style={{ width: '100%', background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '8px 12px', fontSize: '14px', outline: 'none', boxSizing: 'border-box' }} />
+              style={{ width: '100%', background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '8px 12px', fontSize: '14px', outline: 'none', boxSizing: 'border-box', color: '#111827' }} />
           </div>
 
           {/* Descripción */}
@@ -96,7 +96,7 @@ export default function Perfil() {
             <textarea value={descripcion} onChange={e => setDescripcion(e.target.value)}
               placeholder="Ej: Disponible, En el trabajo..."
               rows={3}
-              style={{ width: '100%', background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '8px 12px', fontSize: '14px', outline: 'none', boxSizing: 'border-box', resize: 'none' }} />
+              style={{ width: '100%', background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '8px 12px', fontSize: '14px', outline: 'none', boxSizing: 'border-box', resize: 'none', color: '#111827' }} />
           </div>
 
           {msg && <p style={{ color: msg.includes('!') ? '#10b981' : '#ef4444', fontSize: '13px', marginBottom: '12px' }}>{msg}</p>}
