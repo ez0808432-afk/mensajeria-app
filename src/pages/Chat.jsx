@@ -6,6 +6,7 @@ import {
   serverTimestamp, updateDoc, deleteDoc, doc, getDocs, where
 } from 'firebase/firestore'
 import EmojiPicker from 'emoji-picker-react'
+import Llamadas from './Llamadas'
 
 /* ── helpers ─────────────────────────────────────────── */
 const initials = name =>
@@ -52,6 +53,7 @@ export default function Chat() {
   const [reacting,     setReacting]     = useState(null)
   const [recording,    setRecording]    = useState(false)
   const [dark,         setDark]         = useState(false)
+  const [llamadaActiva, setLlamadaActiva] = useState(null) // Puede ser: null, 'audio' o 'video'
   const [showAttach,   setShowAttach]   = useState(false)  // menú adjuntar
   const [showChatOpts, setShowChatOpts] = useState(false)  // menú ⋮
 
@@ -87,6 +89,9 @@ export default function Chat() {
       return () => unsub()
     }
   }, [chatId])
+
+  const llamar = () => { setLlamadaActiva('audio') }
+  const videoLlamar = () => { setLlamadaActiva('video') }
 
   /* ── mensajes ──────────────────────────────────────── */
   useEffect(() => {
@@ -223,8 +228,6 @@ export default function Chat() {
   }
 
   /* ── llamada / videollamada (placeholder) ──────────── */
-  const llamar = () => alert('📞 Función de llamada próximamente')
-  const videoLlamar = () => alert('📹 Función de videollamada próximamente')
 
   /* ── datos contacto ────────────────────────────────── */
   const contactoFoto   = contactoInfo?.foto   || contacto?.foto   || null
@@ -274,10 +277,10 @@ export default function Chat() {
         fontFamily: 'system-ui, sans-serif', transition: 'background 0.3s'
       }}
     >
-      {/* Contenedor adaptable:
-          móvil  → pantalla completa
-          tablet → tarjeta centrada 520px
-          laptop → tarjeta más ancha 900px con margen */}
+      {/* ── INTERFAZ DE LLAMADAS EN TIEMPO REAL ── */}
+      {llamadaActiva ? (
+        <Llamadas chatId={chatId} tipoInicial={llamadaActiva} onTerminar={() => setLlamadaActiva(null)} />
+      ) : (
       <div style={{
         width: '100%',
         height: '100vh',
@@ -632,6 +635,7 @@ export default function Chat() {
         </div>
 
       </div>
+      )}
 
       {/* Animación pulso para grabación */}
       <style>{`@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.5} }`}</style>

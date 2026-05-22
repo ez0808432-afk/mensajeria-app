@@ -29,16 +29,12 @@ function App() {
 
     window.addEventListener('beforeunload', handleOffline)
     document.addEventListener('visibilitychange', handleVisibilityChange)
-    window.addEventListener('blur', handleOffline)
-    window.addEventListener('focus', updateOnline)
 
     updateOnline()
 
     return () => {
       window.removeEventListener('beforeunload', handleOffline)
       document.removeEventListener('visibilitychange', handleVisibilityChange)
-      window.removeEventListener('blur', handleOffline)
-      window.removeEventListener('focus', updateOnline)
     }
   }, [])
 
